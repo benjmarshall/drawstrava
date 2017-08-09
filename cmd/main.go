@@ -29,7 +29,10 @@ func main() {
 		}
 	}
 
-	e := elevationgraph.New(athleteID)
-	e.MakeImage(accessToken)
+	e := elevationgraph.New()
+	err := e.MakeImage(accessToken)
+	if err != nil {
+		panic(err)
+	}
 
 }

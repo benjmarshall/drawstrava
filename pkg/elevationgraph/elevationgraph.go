@@ -1,6 +1,8 @@
 package elevationgraph
 
 import (
+	"errors"
+	"log"
 	"time"
 
 	"github.com/fogleman/gg"
@@ -11,7 +13,6 @@ import (
 type Type struct {
 	activities   []activity
 	dc           *gg.Context
-	athleteID    int64
 	mergedStream []float64
 }
 
@@ -21,21 +22,29 @@ type activity struct {
 }
 
 // New creates a new elevationgraph structure
-func New(athleteID int64) *Type {
+func New() *Type {
 	w := 1024
 	h := 300
 
 	t := new(Type)
 	t.dc = gg.NewContext(w, h)
-	t.athleteID = athleteID
 	return t
 }
 
 // MakeImage create a png image of the elevationgraph type
-func (t *Type) MakeImage(accessToken string) {
-	t.getActivities(accessToken)
+func (t *Type) MakeImage(accessToken string) error {
+	err := t.getActivities(accessToken)
+	if err != nil {
+		log.Println(err)
+		return errors.New("error retreiving activity summaries")
+	}
+	err = t.getActivityStreams(accessToken)
+	if err != nil {
+		return errors.New("error retreiving activity stream")
+	}
 	t.mergeStreams()
 	t.drawImage()
+	return nil
 }
 
 func (t *Type) getActivities(accessToken string) error {
@@ -51,23 +60,34 @@ func (t *Type) getActivities(accessToken string) error {
 		return err
 	}
 
+	for _, a := range activities {
+		t.activities = append(t.activities, activity{activitySummary: a, activiyStream: new(strava.StreamSet)})
+	}
+
+	return nil
+}
+
+func (t *Type) getActivityStreams(accessToken string) error {
+
+	client := strava.NewClient(accessToken)
+
 	types := []strava.StreamType{"altitude"}
 	resolution := "low"
 	seriesType := "distance"
 
-	for _, a := range activities {
-
-		s, err := strava.NewActivityStreamsService(client).Get(a.Id, types).Resolution(resolution).SeriesType(seriesType).Do()
+	for _, a := range t.activities {
+		s, err := strava.NewActivityStreamsService(client).Get(a.activitySummary.Id, types).Resolution(resolution).SeriesType(seriesType).Do()
 		if err != nil {
 			return err
 		}
-
-		t.activities = append(t.activities, activity{activitySummary: a, activiyStream: s})
+		*a.activiyStream = *s
 	}
+
 	return nil
 }
 
 func (t *Type) mergeStreams() {
+	t.mergedStream = []float64{}
 	for _, a := range t.activities {
 		t.mergedStream = append(t.mergedStream, a.activiyStream.Elevation.Data...)
 	}
