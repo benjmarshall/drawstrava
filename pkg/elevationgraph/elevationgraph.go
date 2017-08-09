@@ -13,12 +13,22 @@ import (
 type Type struct {
 	activities   []activity
 	dc           *gg.Context
-	mergedStream []float64
+	mergedStream *mergedStream
 }
 
 type activity struct {
 	activitySummary *strava.ActivitySummary
 	activiyStream   *strava.StreamSet
+}
+
+type mergedStream struct {
+	data []float64 // The data stream itself
+	tags []tag     // A list of tags identifying where in the merges stream different rides are
+}
+
+type tag struct {
+	rideName  string
+	dataIndex int // Represents the start index in the merged stream of the ride
 }
 
 // New creates a new elevationgraph structure
@@ -87,11 +97,11 @@ func (t *Type) getActivityStreams(accessToken string) error {
 }
 
 func (t *Type) mergeStreams() {
-	t.mergedStream = []float64{}
+	t.mergedStream = new(mergedStream)
 	// Add activities in reverse order as they are stored by date newest first
 	// and we want a chronological output
 	for i := len(t.activities) - 1; i >= 0; i-- {
-		t.mergedStream = append(t.mergedStream, t.activities[i].activiyStream.Elevation.Data...)
+		t.mergedStream.data = append(t.mergedStream.data, t.activities[i].activiyStream.Elevation.Data...)
 	}
 }
 
@@ -100,15 +110,15 @@ func (t *Type) drawImage() {
 	t.dc.Clear()
 	t.dc.SetRGB(0, 0, 0)
 	t.dc.SetLineWidth(2.0)
-	incr := float64(t.dc.Width()) / float64(len(t.mergedStream))
-	minVal := minFloatInSlice(t.mergedStream)
-	hRange := maxFloatInSlice(t.mergedStream) - minVal
+	incr := float64(t.dc.Width()) / float64(len(t.mergedStream.data))
+	minVal := minFloatInSlice(t.mergedStream.data)
+	hRange := maxFloatInSlice(t.mergedStream.data) - minVal
 	hScale := float64(t.dc.Height()) / hRange
 	x1 := 0.0
 
-	for i := 1; i < len(t.mergedStream); i++ {
-		y1 := float64(t.dc.Height()) - ((t.mergedStream[i-1] - minVal) * hScale)
-		y2 := float64(t.dc.Height()) - ((t.mergedStream[i] - minVal) * hScale)
+	for i := 1; i < len(t.mergedStream.data); i++ {
+		y1 := float64(t.dc.Height()) - ((t.mergedStream.data[i-1] - minVal) * hScale)
+		y2 := float64(t.dc.Height()) - ((t.mergedStream.data[i] - minVal) * hScale)
 		x2 := x1 + incr
 		t.dc.DrawLine(x1, y1, x2, y2)
 		t.dc.Stroke()
