@@ -88,8 +88,10 @@ func (t *Type) getActivityStreams(accessToken string) error {
 
 func (t *Type) mergeStreams() {
 	t.mergedStream = []float64{}
-	for _, a := range t.activities {
-		t.mergedStream = append(t.mergedStream, a.activiyStream.Elevation.Data...)
+	// Add activities in reverse order as they are stored by date newest first
+	// and we want a chronological output
+	for i := len(t.activities) - 1; i >= 0; i-- {
+		t.mergedStream = append(t.mergedStream, t.activities[i].activiyStream.Elevation.Data...)
 	}
 }
 
