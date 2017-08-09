@@ -23,7 +23,7 @@ type activity struct {
 
 // New creates a new elevationgraph structure
 func New() *Type {
-	w := 1024
+	w := 1500
 	h := 300
 
 	t := new(Type)
