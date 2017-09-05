@@ -3,22 +3,20 @@ package elevationgraph
 import (
 	"errors"
 	"log"
+	"math"
 	"time"
 
 	"github.com/fogleman/gg"
 	"github.com/strava/go.strava"
+
+	"github.com/benjmarshall/drawstrava/pkg/activities"
 )
 
 // Type defines the structure for an elevationgraph object
 type Type struct {
-	activities   []activity
+	activityList []activities.Activity
 	dc           *gg.Context
 	mergedStream *mergedStream
-}
-
-type activity struct {
-	activitySummary *strava.ActivitySummary
-	activiyStream   *strava.StreamSet
 }
 
 type mergedStream struct {
@@ -27,8 +25,9 @@ type mergedStream struct {
 }
 
 type tag struct {
-	rideName  string
-	dataIndex int // Represents the start index in the merged stream of the ride
+	rideName     string
+	dataIndex    int // Represents the start index in the merged stream of the ride
+	oneDirection bool
 }
 
 // New creates a new elevationgraph structure
@@ -65,13 +64,13 @@ func (t *Type) getActivities(accessToken string) error {
 	before := timeNow.Unix()
 	after := timeNow.Add(-1 * time.Hour * 24 * 14).Unix()
 
-	activities, err := strava.NewCurrentAthleteService(client).ListActivities().Before(int(before)).After(int(after)).Do()
+	activityList, err := strava.NewCurrentAthleteService(client).ListActivities().Before(int(before)).After(int(after)).Do()
 	if err != nil {
 		return err
 	}
 
-	for _, a := range activities {
-		t.activities = append(t.activities, activity{activitySummary: a, activiyStream: new(strava.StreamSet)})
+	for _, a := range activityList {
+		t.activityList = append(t.activityList, activities.New(a))
 	}
 
 	return nil
@@ -81,16 +80,11 @@ func (t *Type) getActivityStreams(accessToken string) error {
 
 	client := strava.NewClient(accessToken)
 
-	types := []strava.StreamType{"altitude"}
-	resolution := "low"
-	seriesType := "distance"
-
-	for _, a := range t.activities {
-		s, err := strava.NewActivityStreamsService(client).Get(a.activitySummary.Id, types).Resolution(resolution).SeriesType(seriesType).Do()
+	for i := range t.activityList {
+		err := t.activityList[i].GetStream(client)
 		if err != nil {
 			return err
 		}
-		*a.activiyStream = *s
 	}
 
 	return nil
@@ -98,11 +92,44 @@ func (t *Type) getActivityStreams(accessToken string) error {
 
 func (t *Type) mergeStreams() {
 	t.mergedStream = new(mergedStream)
-	// Add activities in reverse order as they are stored by date newest first
+	// Add activityList in reverse order as they are stored by date newest first
 	// and we want a chronological output
-	for i := len(t.activities) - 1; i >= 0; i-- {
-		t.mergedStream.data = append(t.mergedStream.data, t.activities[i].activiyStream.Elevation.Data...)
+	for i := len(t.activityList) - 1; i >= 0; i-- {
+		t.mergedStream.addStream(&t.activityList[i])
 	}
+}
+
+func (m *mergedStream) addStream(a *activities.Activity) {
+	stats := a.GetStats()
+
+	// See if the ride is a downhill/uphill only
+	isOneWay := false
+	if math.Abs(stats.StartEl-stats.EndEl) > 0.25*stats.MaxEl-stats.MinEl {
+		isOneWay = true
+	}
+
+	// Get the last elevation value of the merged stream
+	var lastEl float64
+	if len(m.data) != 0 {
+		lastEl = m.data[len(m.data)-1]
+	}
+
+	// Pull in the data
+	data := a.GetElevationData()
+
+	// Start the new data where the last ride left off.
+	var diff float64
+	if isOneWay {
+		diff = data[len(data)-1] - lastEl
+	} else {
+		diff = data[0] - lastEl
+	}
+	for i := range data {
+		data[i] -= diff
+	}
+
+	m.tags = append(m.tags, tag{rideName: a.GetName(), dataIndex: len(m.data), oneDirection: isOneWay})
+	m.data = append(m.data, data...)
 }
 
 func (t *Type) drawImage() {
@@ -115,8 +142,18 @@ func (t *Type) drawImage() {
 	hRange := maxFloatInSlice(t.mergedStream.data) - minVal
 	hScale := float64(t.dc.Height()) / hRange
 	x1 := 0.0
+	tagCount := 0
 
 	for i := 1; i < len(t.mergedStream.data); i++ {
+		t.dc.SetRGB(0, 0, 0)
+		if tagCount < len(t.mergedStream.tags)-1 {
+			if i == t.mergedStream.tags[tagCount+1].dataIndex {
+				if t.mergedStream.tags[tagCount+1].oneDirection == true {
+					t.dc.SetRGBA(0, 0, 0, 0.5)
+				}
+				tagCount++
+			}
+		}
 		y1 := float64(t.dc.Height()) - ((t.mergedStream.data[i-1] - minVal) * hScale)
 		y2 := float64(t.dc.Height()) - ((t.mergedStream.data[i] - minVal) * hScale)
 		x2 := x1 + incr
